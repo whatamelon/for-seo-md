@@ -21,10 +21,15 @@ declare global {
       log: (message: string) => void;
     };
     readFileAsDataUrl?: (filePath: string) => Promise<string>;
+    getSmartFilename?: (imagePath: string) => Promise<string>;
   }
 }
 
-export default function MarketResizePanel({ imageSrc, imageFile, onResizeSuccess }: MarketResizePanelProps) {
+export default function MarketResizePanel({
+  imageSrc,
+  imageFile,
+  onResizeSuccess,
+}: MarketResizePanelProps) {
   const [selectedMarkets, setSelectedMarkets] = useState<Market[]>([]);
   const [folderPath, setFolderPath] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -34,7 +39,8 @@ export default function MarketResizePanel({ imageSrc, imageFile, onResizeSuccess
   useEffect(() => {
     if (window.electronStore) {
       const savedMarkets = window.electronStore.get("selectedMarkets");
-      if (Array.isArray(savedMarkets)) setSelectedMarkets(savedMarkets as Market[]);
+      if (Array.isArray(savedMarkets))
+        setSelectedMarkets(savedMarkets as Market[]);
       const savedFolder = window.electronStore.get("folderPath");
       if (typeof savedFolder === "string") setFolderPath(savedFolder);
     }
@@ -46,7 +52,8 @@ export default function MarketResizePanel({ imageSrc, imageFile, onResizeSuccess
       const next = prev.includes(market)
         ? prev.filter((m) => m !== market)
         : [...prev, market];
-      if (window.electronStore) window.electronStore.set("selectedMarkets", next);
+      if (window.electronStore)
+        window.electronStore.set("selectedMarkets", next);
       return next;
     });
   };
@@ -66,7 +73,12 @@ export default function MarketResizePanel({ imageSrc, imageFile, onResizeSuccess
 
   // 리사이즈 실행
   const handleResize = async () => {
-    window.electronLogger?.log("리사이즈 시작", { imageFile, imageSrc, selectedMarkets, folderPath });
+    window.electronLogger?.log("리사이즈 시작", {
+      imageFile,
+      imageSrc,
+      selectedMarkets,
+      folderPath,
+    });
     if (!imageFile && !imageSrc) {
       toast.error("이미지를 먼저 업로드하세요.");
       return;
@@ -96,11 +108,33 @@ export default function MarketResizePanel({ imageSrc, imageFile, onResizeSuccess
       for (const market of selectedMarkets) {
         const rule = MARKET_IMAGE_RULES.find((r) => r.market === market)!;
         const blob = await resizeImage(fileOrUrl, rule, "jpg");
-        blobs.push({ market, blob });
-        // 파일 정보 수집
-        const fileName = `${market}_${blob.size}.jpg`;
+        blobs.push({ market, market_en: rule.market_en, blob });
+
+        if (window.electronAPI?.saveTempImage) {
+          const tempFilePath = await window.electronAPI.saveTempImage(
+            await blob.arrayBuffer(),
+            "jpg",
+          );
+          tempFileToDelete = tempFilePath;
+        }
+
+        let smartFileName = "";
+        try {
+          if (tempFileToDelete && window.electronAPI?.getSmartFilename) {
+            const inferResult =
+              await window.electronAPI.getSmartFilename(tempFileToDelete);
+            // infer.py 출력 파싱
+            const match = inferResult.match(/Filename:\s*([a-z0-9_]+)/i);
+            smartFileName = match
+              ? match[1] + ".jpg"
+              : `${rule.market_en}_${blob.size}.jpg`;
+          }
+        } catch (e: any) {
+          console.error(e);
+          smartFileName = `${rule.market_en}_${blob.size}.jpg`; // 실패 시 fallback
+        }
         const subFolder = dayjs().format("YYMMDD_HHmmss");
-        const filePath = folderPath + "/" + subFolder + "/" + fileName;
+        const filePath = folderPath + "/" + subFolder + "/" + smartFileName;
         // 이미지 크기 추출
         const img = await new Promise<HTMLImageElement>((resolve, reject) => {
           const url = URL.createObjectURL(blob);
@@ -115,7 +149,7 @@ export default function MarketResizePanel({ imageSrc, imageFile, onResizeSuccess
         resultInfos.push({
           market,
           filePath,
-          fileName,
+          fileName: smartFileName,
           width: img.width,
           height: img.height,
           size: blob.size,
@@ -124,18 +158,24 @@ export default function MarketResizePanel({ imageSrc, imageFile, onResizeSuccess
       // 저장 폴더명 생성
       const subFolder = dayjs().format("YYMMDD_HHmmss");
       // 파일명 및 데이터 준비
-      const files = await Promise.all(blobs.map(async ({ market, blob }) => ({
-        name: `${market}_${blob.size}.jpg`,
-        data: await blob.arrayBuffer(),
-      })));
+      const files = await Promise.all(
+        blobs.map(async ({ market, blob }) => ({
+          name: `${market}_${blob.size}.jpg`,
+          data: await blob.arrayBuffer(),
+        })),
+      );
       // 저장 호출
       if (window.electronAPI?.saveImages) {
         await window.electronAPI.saveImages(folderPath, files, subFolder);
         setResizeResults(resultInfos);
-        toast("저장 완료", { description: `${blobs.length}개 마켓용 이미지가 저장되었습니다.` });
+        toast("저장 완료", {
+          description: `${blobs.length}개 마켓용 이미지가 저장되었습니다.`,
+        });
       } else {
-        toast.error("저장 실패", { description: "Electron 환경에서만 저장이 지원됩니다." });
-      }   
+        toast.error("저장 실패", {
+          description: "Electron 환경에서만 저장이 지원됩니다.",
+        });
+      }
       if (onResizeSuccess) onResizeSuccess(blobs);
       // 리사이즈 성공 후 임시 파일 삭제
       if (tempFileToDelete && window.electronAPI?.deleteTempFile) {
@@ -154,22 +194,26 @@ export default function MarketResizePanel({ imageSrc, imageFile, onResizeSuccess
   };
 
   return (
-    <div className="w-full max-w-md flex flex-col gap-6">
-      <h2 className="text-lg font-bold flex items-start justify-start w-full">2. Select</h2>
+    <div className="flex w-full max-w-md flex-col gap-6">
+      <h2 className="flex w-full items-start justify-start text-lg font-bold">
+        2. Select
+      </h2>
       <div>
-        <div className="font-semibold text-sm mb-2">2-1. Select Market</div>
+        <div className="mb-2 text-sm font-semibold">2-1. Select Market</div>
         <div className="flex flex-wrap gap-3">
-          <label className="flex items-center gap-1 cursor-pointer select-none">
+          <label className="flex cursor-pointer items-center gap-1 select-none">
             <Checkbox
               checked={selectedMarkets.length === MARKET_IMAGE_RULES.length}
               onCheckedChange={() => {
                 if (selectedMarkets.length === MARKET_IMAGE_RULES.length) {
-                  setSelectedMarkets([])
-                  if (window.electronStore) window.electronStore.set("selectedMarkets", [])
+                  setSelectedMarkets([]);
+                  if (window.electronStore)
+                    window.electronStore.set("selectedMarkets", []);
                 } else {
-                  const all = MARKET_IMAGE_RULES.map(r => r.market)
-                  setSelectedMarkets(all)
-                  if (window.electronStore) window.electronStore.set("selectedMarkets", all)
+                  const all = MARKET_IMAGE_RULES.map((r) => r.market);
+                  setSelectedMarkets(all);
+                  if (window.electronStore)
+                    window.electronStore.set("selectedMarkets", all);
                 }
               }}
               className="accent-primary"
@@ -178,7 +222,10 @@ export default function MarketResizePanel({ imageSrc, imageFile, onResizeSuccess
             <span className="text-sm font-semibold">All</span>
           </label>
           {MARKET_IMAGE_RULES.map((rule) => (
-            <label key={rule.market} className="flex items-center gap-1 cursor-pointer select-none">
+            <label
+              key={rule.market}
+              className="flex cursor-pointer items-center gap-1 select-none"
+            >
               <Checkbox
                 checked={selectedMarkets.includes(rule.market)}
                 onCheckedChange={() => handleMarketChange(rule.market)}
@@ -191,21 +238,25 @@ export default function MarketResizePanel({ imageSrc, imageFile, onResizeSuccess
         </div>
       </div>
       <div>
-        <div className="font-semibold text-sm mb-2">2-2. Select Save Folder</div>
-        <div className="flex gap-2 items-center">
+        <div className="mb-2 text-sm font-semibold">
+          2-2. Select Save Folder
+        </div>
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            className="px-3 py-1.5 rounded-md bg-secondary text-secondary-foreground shadow hover:bg-secondary/80 flex-shrink-0 font-semibold text-xs"
+            className="bg-secondary text-secondary-foreground hover:bg-secondary/80 flex-shrink-0 rounded-md px-3 py-1.5 text-xs font-semibold shadow"
             onClick={handleSelectFolder}
           >
             Select Folder
           </button>
-          <span className="text-xs text-gray-500 break-all max-w-full flex-grow leading-snug line-clamp-2">{folderPath || "(선택 안 됨)"}</span>
+          <span className="line-clamp-2 max-w-full flex-grow text-xs leading-snug break-all text-gray-500">
+            {folderPath || "(선택 안 됨)"}
+          </span>
         </div>
       </div>
       <button
         type="button"
-        className="mt-2 px-4 py-2 rounded-md bg-primary text-primary-foreground font-semibold shadow hover:bg-primary/90 disabled:opacity-50"
+        className="bg-primary text-primary-foreground hover:bg-primary/90 mt-2 rounded-md px-4 py-2 font-semibold shadow disabled:opacity-50"
         onClick={handleResize}
         disabled={loading}
       >
@@ -214,4 +265,4 @@ export default function MarketResizePanel({ imageSrc, imageFile, onResizeSuccess
       {resizeResults.length > 0 && <ResizeResultList results={resizeResults} />}
     </div>
   );
-} 
+}

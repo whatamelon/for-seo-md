@@ -6,7 +6,8 @@ exposeContexts();
 
 (async () => {
   const ElectronStoreModule = await import("electron-store");
-  const ElectronStore = (ElectronStoreModule as any).default || ElectronStoreModule;
+  const ElectronStore =
+    (ElectronStoreModule as any).default || ElectronStoreModule;
   const store = new (ElectronStore as any)();
 
   contextBridge.exposeInMainWorld("electronStore", {
@@ -18,8 +19,11 @@ exposeContexts();
 contextBridge.exposeInMainWorld("electronAPI", {
   selectFile: () => ipcRenderer.invoke("dialog:openFile"),
   selectFolder: () => ipcRenderer.invoke("dialog:openFolder"),
-  saveImages: (baseFolder: string, files: { name: string; data: ArrayBuffer }[], subFolder: string) =>
-    ipcRenderer.invoke("save-images", baseFolder, files, subFolder),
+  saveImages: (
+    baseFolder: string,
+    files: { name: string; data: ArrayBuffer }[],
+    subFolder: string,
+  ) => ipcRenderer.invoke("save-images", baseFolder, files, subFolder),
   saveTempImage: (data: ArrayBuffer, ext: string) =>
     ipcRenderer.invoke("save-temp-image", data, ext),
   deleteTempFile: (filePath: string) =>
@@ -30,6 +34,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("read-file-as-dataurl", filePath),
   openFileLocation: (filePath: string) =>
     ipcRenderer.invoke("open-file-location", filePath),
+  getSmartFilename: (imagePath: string) =>
+    ipcRenderer.invoke("get-smart-filename", imagePath),
 });
 
 contextBridge.exposeInMainWorld("electronLogger", {

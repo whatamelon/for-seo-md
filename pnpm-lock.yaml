@@ -169,7 +169,7 @@ importers:
         specifier: ^9.28.0
         version: 9.29.0
       '@playwright/test':
-        specifier: ^1.52.0
+        specifier: ^1.53.1
         version: 1.53.1
       '@testing-library/jest-dom':
         specifier: ^6.6.3
